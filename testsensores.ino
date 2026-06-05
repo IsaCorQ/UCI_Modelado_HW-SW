@@ -3,26 +3,29 @@
 #include <Adafruit_VEML7700.h>
 #include <Wire.h>
 
-// Definimos el pin digital donde se conecta el sensor DHT
 #define DHTPIN 2
-#define DHTTYPE DHT22   // DHT 22  (AM2302)
+#define DHTTYPE DHT22
 
-// Pin definitions
-#define WATER_LEVEL_PIN A0 // Water level sensor
-#define LUX_RELAY_PIN 4    // Digital output to activate relay/device
+#define SOIL_HUMIDITY_PIN A0
+#define HUMIDIFIER_PIN 3
+#define MOTOR_PIN 5
+#define LED_PIN 6
 
-// Inicializamos el sensor DHT11
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_VEML7700 veml = Adafruit_VEML7700();
 
-// Sensor readings
-float humidity = 0;
+float dhtHumidity = 0;
 float temperature = 0;
-int waterLevel = 0;
+int soilHumidity = 0;
 float lux = 0;
 
-// Lux threshold (adjust as needed)
-float LUX_THRESHOLD = 500.0;
+int soilMin = 0, soilMax = 800;
+float TEMP_HIGH = 28.0;
+float LUX_LOW = 200.0;
+int SOIL_DRY_ADC = 300;
+int SOIL_WET_ADC = 400;
+
+int chipState = 3;  // 1=ON+LED, 2=ON noLED, 3=OFF
 
 void setup() {
   // Inicializamos comunicación serie
@@ -44,43 +47,74 @@ void setup() {
   veml.setGain(VEML7700_GAIN_1);
   veml.setIntegrationTime(VEML7700_IT_100MS);
   
-  // Initialize digital output pin
-  pinMode(LUX_RELAY_PIN, OUTPUT);
-  digitalWrite(LUX_RELAY_PIN, LOW);
+  pinMode(HUMIDIFIER_PIN, OUTPUT);
+  pinMode(MOTOR_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  
+  digitalWrite(HUMIDIFIER_PIN, LOW);
+  digitalWrite(MOTOR_PIN, LOW);
+  digitalWrite(LED_PIN, LOW);
   
   Serial.println("Todos los sensores inicializados!");
   Serial.println("Iniciando lecturas...\n");
 }
 
 void loop() {
-  // Read data and store it to variables hum and temp
   float hum = dht.readHumidity();
   float temp = dht.readTemperature();
   
-  // Read water level (0-1023)
-  waterLevel = analogRead(WATER_LEVEL_PIN);
+  soilHumidity = analogRead(SOIL_HUMIDITY_PIN);
+  int soilPercent = map(soilHumidity, soilMin, soilMax, 0, 100);
+  soilPercent = constrain(soilPercent, 0, 100);
   
-  // Read lux value from VEML7700
   lux = veml.readLux();
   
-  // Activate relay/output if lux exceeds threshold
-  if (lux > LUX_THRESHOLD) {
-    digitalWrite(LUX_RELAY_PIN, HIGH);
-  } else {
-    digitalWrite(LUX_RELAY_PIN, LOW);
+  int targetState = 3;  // Default OFF
+  if (soilHumidity < 400) {
+    targetState = 2;    // ON without LED
   }
   
-  // Print all sensor readings
-  Serial.print("Humidity: ");
-  Serial.print(hum);
-  Serial.print(" %, Temp: ");
-  Serial.print(temp);
-  Serial.print(" Celsius | Water: ");
-  Serial.print(waterLevel);
-  Serial.print(" | Lux: ");
-  Serial.print(lux);
-  Serial.print(" | Relay: ");
-  Serial.println(digitalRead(LUX_RELAY_PIN) ? "ON" : "OFF");
+  if (targetState != chipState) {
+    int pulsesNeeded = (targetState - chipState + 3) % 3;
+    if (pulsesNeeded == 0) pulsesNeeded = 3;
+    
+    for (int i = 0; i < pulsesNeeded; i++) {
+      delay(100);
+      digitalWrite(HUMIDIFIER_PIN, HIGH);
+      delay(500);
+      digitalWrite(HUMIDIFIER_PIN, LOW);
+    }
+    chipState = targetState;
+  }
   
-  delay(2000); // Delay 2 sec.
+  if (temp > TEMP_HIGH) {
+    digitalWrite(MOTOR_PIN, HIGH);
+  } else {
+    digitalWrite(MOTOR_PIN, LOW);
+  }
+  
+  if (lux < LUX_LOW) {
+    digitalWrite(LED_PIN, HIGH);
+  } else {
+    digitalWrite(LED_PIN, LOW);
+  }
+  
+  Serial.print("ADC: ");
+  Serial.print(soilHumidity);
+  Serial.print(" | Soil%: ");
+  Serial.print(soilPercent);
+  Serial.print(" | DHT Hum: ");
+  Serial.print(hum);
+  Serial.print("% | Temp: ");
+  Serial.print(temp);
+  Serial.print("C | Lux: ");
+  Serial.print(lux);
+  Serial.print(" | Humid: ");
+  Serial.print(digitalRead(HUMIDIFIER_PIN) ? "ON" : "OFF");
+  Serial.print(" | Motor: ");
+  Serial.print(digitalRead(MOTOR_PIN) ? "ON" : "OFF");
+  Serial.print(" | LED: ");
+  Serial.println(digitalRead(LED_PIN) ? "ON" : "OFF");
+  
+  delay(2000);
 }
